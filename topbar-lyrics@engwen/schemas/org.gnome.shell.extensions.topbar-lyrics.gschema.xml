@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="topbar-lyrics">
+
+  <schema id="org.gnome.shell.extensions.topbar-lyrics"
+          path="/org/gnome/shell/extensions/topbar-lyrics/">
+
+    <!-- ============ 位置与排序 ============ -->
+
+    <key name="position" type="s">
+      <choices>
+        <choice value="left"/>
+        <choice value="center"/>
+        <choice value="right"/>
+      </choices>
+      <default>'right'</default>
+      <summary>顶栏区域</summary>
+      <description>歌词显示在顶栏的左侧、中间还是右侧。</description>
+    </key>
+
+    <key name="position-index" type="i">
+      <range min="0" max="30"/>
+      <default>0</default>
+      <summary>显示顺序</summary>
+      <description>在同一区域内排第几位，0 表示最靠前。</description>
+    </key>
+
+    <!-- ============ 尺寸 ============ -->
+
+    <key name="panel-width" type="i">
+      <range min="80" max="800"/>
+      <default>260</default>
+      <summary>面板长度（像素）</summary>
+      <description>歌词显示区域的最大宽度，超出部分自动滚动。</description>
+    </key>
+
+    <key name="font-size" type="i">
+      <range min="8" max="24"/>
+      <default>12</default>
+      <summary>字号（像素）</summary>
+      <description>顶栏歌词的字号。</description>
+    </key>
+
+    <key name="hide-when-idle" type="b">
+      <default>true</default>
+      <summary>无播放时隐藏</summary>
+      <description>没有播放器在播放时隐藏顶栏歌词。</description>
+    </key>
+
+    <!-- ============ 歌词效果 ============ -->
+
+    <key name="karaoke" type="b">
+      <default>true</default>
+      <summary>卡拉 OK 模式</summary>
+      <description>当前行歌词随播放进度从底色逐渐变为高亮色。</description>
+    </key>
+
+    <key name="color-inactive" type="s">
+      <default>'#4aa3ff'</default>
+      <summary>未唱到的颜色</summary>
+      <description>卡拉 OK 模式下尚未唱到的歌词颜色。</description>
+    </key>
+
+    <key name="color-active" type="s">
+      <default>'#2ee66b'</default>
+      <summary>已唱到的颜色</summary>
+      <description>卡拉 OK 模式下已经唱到的歌词颜色。</description>
+    </key>
+
+    <key name="marquee" type="b">
+      <default>true</default>
+      <summary>超长自动滚动</summary>
+      <description>歌词长度超过面板长度时自动滚动；关闭后仅显示省略号。</description>
+    </key>
+
+    <key name="marquee-speed" type="i">
+      <range min="10" max="200"/>
+      <default>45</default>
+      <summary>滚动速度（像素/秒）</summary>
+      <description>自动滚动时的移动速度。卡拉 OK 模式下为跟随高亮滚动，不受此项影响。</description>
+    </key>
+
+    <key name="lyrics-offset" type="i">
+      <range min="-20000" max="20000"/>
+      <default>0</default>
+      <summary>歌词偏移（毫秒）</summary>
+      <description>正数表示歌词提前显示，负数表示延后，用于校正不同播放器的延迟。</description>
+    </key>
+
+    <!-- ============ 歌词来源 ============ -->
+
+    <key name="lyrics-dir" type="s">
+      <default>''</default>
+      <summary>用户歌词目录</summary>
+      <description>查找同名 .lrc 的第一优先目录</description>
+    </key>
+
+    <key name="cache-enabled" type="b">
+      <default>true</default>
+      <summary>缓存歌词</summary>
+      <description>把下载过的歌词缓存在本地，重复播放时不再联网。</description>
+    </key>
+
+    <key name="preferred-player" type="s">
+      <default>''</default>
+      <summary>优先的播放器</summary>
+      <description>MPRIS 播放器名称（如 spotify）；留空则自动选择正在播放的播放器。</description>
+    </key>
+
+    <key name="fallback-template" type="s">
+      <default>'{artist} - {title}'</default>
+      <summary>无歌词时的文案</summary>
+      <description>可用占位符：{artist}、{title}、{album}、{player}。</description>
+    </key>
+
+  </schema>
+</schemalist>

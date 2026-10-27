@@ -1,0 +1,12 @@
+{
+  "uuid": "topbar-lyrics@engwen",
+  "name": "Top Bar Lyrics",
+  "description": "在顶栏显示当前播放音乐的同步歌词：可设置位置与排序、固定面板长度并在超长时自动滚动，支持卡拉 OK 逐字着色。纯显示，不响应点击。",
+  "shell-version": [
+    "49",
+    "50"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.topbar-lyrics",
+  "version": 1,
+  "url": "https://lrclib.net"
+}

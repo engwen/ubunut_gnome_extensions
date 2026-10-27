@@ -1,0 +1,28 @@
+/* Top Bar Lyrics — 顶栏歌词：纯文字，无背景、无胶囊样式 */
+
+.topbar-lyrics-button {
+    background: transparent;
+    background-color: transparent;
+    border: none;
+    border-color: transparent;
+    box-shadow: none;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.topbar-lyrics-button:hover,
+.topbar-lyrics-button:active {
+    background: transparent;
+    background-color: transparent;
+}
+
+.topbar-lyrics {
+    margin: 0;
+    background: transparent;
+}
+
+.topbar-lyrics-label {
+    padding: 0;
+    margin: 0;
+    background: transparent;
+}
