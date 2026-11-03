@@ -16,49 +16,61 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {LyricsService} from './lib/lyricsService.js';
 import {LyricsView} from './lib/lyricsView.js';
+import {logger} from './lib/logger.js';
 import {MprisWatcher} from './lib/mpris.js';
 
 const ROLE = 'topbar-lyrics';
 
 export default class TopBarLyricsExtension extends Extension {
     enable() {
-        this._destroyed = false;
-        this._settings = this.getSettings();
-        this._service = new LyricsService(this._settings);
-        this._mpris = new MprisWatcher();
-        this._mpris.setPreferred(this._settings.get_string('preferred-player'));
+        logger.init();
+        logger.info('extension', 'enable 开始', {version: this.metadata?.version});
 
-        this._indicator = null;
-        this._view = null;
-        this._state = null;
-        this._doc = null;
-        this._trackKey = null;
-        this._loadToken = 0;
-        this._cancellable = null;
+        try {
+            this._destroyed = false;
+            this._settings = this.getSettings();
+            this._service = new LyricsService(this._settings);
+            this._mpris = new MprisWatcher();
+            this._mpris.setPreferred(this._settings.get_string('preferred-player'));
 
-        this._buildIndicator();
+            this._indicator = null;
+            this._view = null;
+            this._state = null;
+            this._doc = null;
+            this._trackKey = null;
+            this._loadToken = 0;
+            this._cancellable = null;
+            this._nowPlaying = {};
 
-        this._settings.connectObject(
-            'changed::position', () => this._buildIndicator(),
-            'changed::position-index', () => this._buildIndicator(),
-            'changed::hide-when-idle', () => this._updateVisibility(),
-            'changed::preferred-player',
-            () => this._mpris?.setPreferred(this._settings.get_string('preferred-player')),
-            'changed::panel-width', () => this._applyConfig(),
-            'changed::font-size', () => this._applyConfig(),
-            'changed::karaoke', () => this._applyConfig(),
-            'changed::color-inactive', () => this._applyConfig(),
-            'changed::color-active', () => this._applyConfig(),
-            'changed::marquee', () => this._applyConfig(),
-            'changed::marquee-speed', () => this._applyConfig(),
-            'changed::lyrics-offset', () => this._applyConfig(),
-            'changed::fallback-template', () => this._applyConfig(),
-            this);
+            this._buildIndicator();
 
-        this._mpris.start(state => this._onPlayerState(state));
+            this._settings.connectObject(
+                'changed::position', () => this._buildIndicator(),
+                'changed::position-index', () => this._buildIndicator(),
+                'changed::hide-when-idle', () => this._updateVisibility(),
+                'changed::preferred-player',
+                () => this._mpris?.setPreferred(this._settings.get_string('preferred-player')),
+                'changed::panel-width', () => this._applyConfig(),
+                'changed::font-size', () => this._applyConfig(),
+                'changed::karaoke', () => this._applyConfig(),
+                'changed::color-inactive', () => this._applyConfig(),
+                'changed::color-active', () => this._applyConfig(),
+                'changed::marquee', () => this._applyConfig(),
+                'changed::marquee-speed', () => this._applyConfig(),
+                'changed::lyrics-offset', () => this._applyConfig(),
+                'changed::fallback-template', () => this._applyConfig(),
+                this);
+
+            this._mpris.start(state => this._onPlayerState(state));
+            logger.info('extension', 'enable 完成');
+        } catch (error) {
+            // 单个环节出问题不应让整个插件挂掉：记录后继续保留已构建的部分
+            logger.error('extension', 'enable 过程出错（已记录）', error);
+        }
     }
 
     disable() {
+        logger.info('extension', 'disable');
         this._destroyed = true;
         this._loadToken++;
         this._cancellable?.cancel();
@@ -75,6 +87,8 @@ export default class TopBarLyricsExtension extends Extension {
         this._state = null;
         this._doc = null;
         this._trackKey = null;
+
+        logger.destroy();
     }
 
     // ------------------------------------------------------------- 顶栏组件
@@ -163,6 +177,9 @@ export default class TopBarLyricsExtension extends Extension {
             return;
 
         if (!state) {
+            logger.info('state', '无播放器 / 已停止');
+            this._nowPlaying = {status: 'Stopped', updatedAt: Date.now()};
+            this._writeNowPlaying();
             this._state = null;
             this._doc = null;
             this._trackKey = null;
@@ -172,6 +189,21 @@ export default class TopBarLyricsExtension extends Extension {
             this._updateVisibility();
             return;
         }
+
+        this._nowPlaying = {
+            status: state.status,
+            busName: state.busName,
+            identity: state.identity,
+            title: state.title,
+            artist: state.artist,
+            album: state.album,
+            lengthUs: state.length,
+            lengthSec: Math.round((state.length ?? 0) / 1e6),
+            url: state.url,
+            trackid: state.trackid,
+            updatedAt: Date.now(),
+        };
+        this._writeNowPlaying();
 
         this._state = state;
 
@@ -185,11 +217,37 @@ export default class TopBarLyricsExtension extends Extension {
             this._doc = null;
             this._view?.setTrack(state);
             this._view?.setLyrics(null);
+            logger.info('state', '切歌', {
+                title: state.title,
+                artist: state.artist,
+                album: state.album,
+                url: state.url || '(播放器未提供)',
+            });
             this._loadLyrics(state);
         }
 
         this._view?.setPlaying(state.status === 'Playing');
         this._updateVisibility();
+    }
+
+    /**
+     * 把当前播放状态落盘到 ~/.cache/topbar-lyrics/nowplaying.json。
+     * 用途：扩展运行在用户桌面、AI 助手跑在独立沙箱，沙箱连不上会话总线；
+     * 借共享文件系统，AI 即可随时读到“现在在播什么”，也便于排查联网抓词失败。
+     */
+    _writeNowPlaying() {
+        try {
+            const dir = Gio.File.new_for_path(
+                GLib.build_filenamev([GLib.get_user_cache_dir(), 'topbar-lyrics']));
+            if (!dir.query_exists(null))
+                dir.make_directory_with_parents(null);
+            dir.get_child('nowplaying.json').replace_contents(
+                new TextEncoder().encode(JSON.stringify(this._nowPlaying, null, 2)),
+                null, false, Gio.FileCreateFlags.NONE, null);
+        } catch (error) {
+            // 调试辅助，落盘失败不影响主流程
+            logger.debug('nowplaying', '状态落盘失败', error);
+        }
     }
 
     /**
@@ -206,7 +264,14 @@ export default class TopBarLyricsExtension extends Extension {
         // ---- 内存缓存命中：同步返回，不进异步链 ----
         const memory = this._service.peekMemory(state);
         if (memory) {
+            logger.debug('load', '内存缓存命中，同步渲染', {
+                source: memory.source,
+                lines: memory.doc?.lines?.length ?? 0,
+            });
             this._doc = memory.doc;
+            this._nowPlaying.lyricsSource = memory.source;
+            this._nowPlaying.lyricsLines = memory.doc?.lines?.length ?? 0;
+            this._writeNowPlaying();
             this._view?.setTrack(state);
             this._view?.setLyrics(memory.doc);
             return;
@@ -225,8 +290,14 @@ export default class TopBarLyricsExtension extends Extension {
                     return; // 已切歌：丢弃过期回调
 
                 this._doc = result?.doc ?? null;
-                console.log(`TopBarLyrics: 歌词来源=${result?.source ?? '未找到'} ` +
-                            `行数=${this._doc?.lines?.length ?? 0}`);
+                this._nowPlaying.lyricsSource = result?.source ?? '未找到';
+                this._nowPlaying.lyricsLines = this._doc?.lines?.length ?? 0;
+                this._nowPlaying.lyricsFetchedAt = Date.now();
+                this._writeNowPlaying();
+                logger.info('load', '歌词加载完成', {
+                    source: result?.source ?? '未找到',
+                    lines: this._doc?.lines?.length ?? 0,
+                });
                 this._view?.setTrack(state);
                 this._view?.setLyrics(this._doc, !this._doc);
             })
@@ -234,7 +305,9 @@ export default class TopBarLyricsExtension extends Extension {
                 if (error instanceof Gio.IOErrorEnum &&
                     error.code === Gio.IOErrorEnum.CANCELLED)
                     return; // 被新任务取消，静默
-                logError(error, 'TopBarLyrics: 歌词加载失败');
+                logger.error('load', '歌词加载失败', error);
+                this._nowPlaying.lyricsSource = `出错: ${error?.message ?? error}`;
+                this._writeNowPlaying();
             });
     }
 

@@ -1,18 +1,30 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// ID3v2 SYLT（同步歌词）解析。
-// 仅支持 ID3v2.3 / ID3v2.4（ID3v1 没有 SYLT，直接跳过）。
+// 本地音频内嵌歌词读取（ID3v2）。
 //
-// 用法：readSyltLrc(path) 返回标准 LRC 文本（每行 "[mm:ss.xx]歌词"），
-//       没有内嵌歌词或格式不支持时返回 null。
+// 支持的歌词帧（按优先级）：
+//   SYLT  v2.3/2.4  同步歌词（带时间轴）→ 直接转 LRC
+//   SLT   v2.2      同步歌词（v2.2 的 SYLT 对应帧）
+//   USLT  v2.3/2.4  非同步歌词（纯文本）→ 若文本本身是 LRC 则按同步处理
+//   ULT   v2.2      非同步歌词
+//   TXXX / COMM     描述里含 "lyric*" 的自定义帧（部分打标工具把歌词塞这里）
+//
+// 兼容 ID3v2.2（3 字节帧 ID）、v2.3（帧长 32 位普通整数）、
+// v2.4（帧长 syncsafe）。只读取标签字节，不碰音频数据流。
+//
+// 对外接口：
+//   readEmbeddedLyrics(path) → {text, synced, format} | null
+//   readSyltLrc(path)        → string(LRC) | null      （旧接口，仅 SYLT）
 
 import Gio from 'gi://Gio';
+
+import {logger} from './logger.js';
 
 const TAG_MAX_BYTES = 16 * 1024 * 1024; // ID3 标签上限，防止异常文件
 
 // --------------------------------------------------------------- 位读取辅助
 
-/** syncsafe 整数（每个字节只含 7 位）→ 普通整数 */
+/** syncsafe 整数（每字节仅 7 位）→ 普通整数 */
 function syncsafe(bytes, offset) {
     return ((bytes[offset] & 0x7f) << 21) |
            ((bytes[offset + 1] & 0x7f) << 14) |
@@ -20,9 +32,13 @@ function syncsafe(bytes, offset) {
            (bytes[offset + 3] & 0x7f);
 }
 
-function uint32(bytes, offset) {
-    return (bytes[offset] << 24) | (bytes[offset + 1] << 16) |
-           (bytes[offset + 2] << 8) | bytes[offset + 3];
+function uint32be(bytes, offset) {
+    return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) |
+            (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+}
+
+function uint24be(bytes, offset) {
+    return (bytes[offset] << 16) | (bytes[offset + 1] << 8) | bytes[offset + 2];
 }
 
 /** 反同步：把 0xFF 0x00 还原成 0xFF */
@@ -39,8 +55,31 @@ function deunsynchronise(bytes) {
 // --------------------------------------------------------------- 文本解码
 
 /**
+ * encoding=0（名义 latin1）的兜底解码。
+ * 中文打标工具常把 GBK 字节硬标成 latin1，直接按 latin1 解会全是乱码。
+ * 先尝试 GB18030（严格模式），只有确实解出中日韩字符才采用，否则退回 latin1。
  * @param {Uint8Array} bytes
- * @param {number} encoding 0=latin1 1=utf16(带BOM) 2=utf16be 3=utf8
+ * @returns {string}
+ */
+function decodeLegacyText(bytes) {
+    try {
+        const text = new TextDecoder('gb18030', {fatal: true}).decode(bytes);
+        if (/[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]/.test(text))
+            return text;
+    } catch {
+        // 不是合法 GB18030
+    }
+
+    try {
+        return new TextDecoder('latin1').decode(bytes);
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @param {number} encoding 0=latin1 1=utf16(BOM) 2=utf16be 3=utf8
  * @returns {string}
  */
 function decodeText(bytes, encoding) {
@@ -60,18 +99,64 @@ function decodeText(bytes, encoding) {
         case 3:
             return new TextDecoder('utf-8').decode(bytes);
         default:
-            return new TextDecoder('latin1').decode(bytes);
+            return decodeLegacyText(bytes);
         }
     } catch {
-        return new TextDecoder('latin1').decode(bytes);
+        return decodeLegacyText(bytes);
     }
 }
 
-// --------------------------------------------------------------- SYLT 帧
+/** 多字节编码（utf16）的字符串以 00 00 结尾，单字节以 00 结尾 */
+function isWideEncoding(encoding) {
+    return encoding === 1 || encoding === 2;
+}
 
 /**
- * 解析 SYLT 帧内容 → [{timeMs, text}]
- * @param {Uint8Array} data 帧体（已做反同步）
+ * 从 data[pos] 起读一个以 0 结尾的字符串。
+ * @param {Uint8Array} data
+ * @param {number} pos
+ * @param {number} encoding
+ * @returns {{text: string, next: number}}
+ */
+function readTerminated(data, pos, encoding) {
+    const wide = isWideEncoding(encoding);
+    // UTF-16 必须按 2 字节步进扫描：逐字节找 00 00 会把最后一个 ASCII 字符的
+    // 高位 0 与终止符拼成假终止符，导致后续偏移整体错位（解出乱码）。
+    const step = wide ? 2 : 1;
+    let end = data.length;
+
+    for (let i = pos; i < data.length; i += step) {
+        if (wide) {
+            if (data[i] === 0x00 && data[i + 1] === 0x00) {
+                end = i;
+                break;
+            }
+        } else if (data[i] === 0x00) {
+            end = i;
+            break;
+        }
+    }
+
+    return {
+        text: decodeText(data.subarray(pos, end), encoding),
+        next: Math.min(data.length, wide ? end + 2 : end + 1),
+    };
+}
+
+/** 去掉首尾空白与零字节，统一换行 */
+function normalizeLyricsText(text) {
+    return String(text ?? '')
+        .replace(/\u0000/g, '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/^\n+/, '')
+        .replace(/\n+$/, '');
+}
+
+// --------------------------------------------------------------- 歌词帧解析
+
+/**
+ * 解析 SYLT 帧 → [{timeMs, text}]
+ * @param {Uint8Array} data
  * @returns {Array<{timeMs: number, text: string}>|null}
  */
 function parseSyltFrame(data) {
@@ -79,23 +164,24 @@ function parseSyltFrame(data) {
         return null;
 
     const encoding = data[0];
-    // data[1..3] = 语言，data[4] = 时间格式，data[5] = 内容类型
+    // data[1..3] 语言，data[4] 时间格式，data[5] 内容类型
     const timeFormat = data[4];
 
     if (timeFormat !== 2) {
-        // 1 = MPEG frames，无法可靠换算成时间，放弃内嵌歌词走下一优先级
+        // 1 = MPEG frames，无法可靠换算时间，放弃内嵌歌词
+        logger.debug('id3', 'SYLT 时间格式非毫秒，跳过', {timeFormat});
         return null;
     }
 
-    // 多字节编码（utf16）以 00 00 结尾，单字节以 00 结尾
-    const wide = encoding === 1 || encoding === 2;
+    const wide = isWideEncoding(encoding);
+    const step = wide ? 2 : 1;
     const entries = [];
     let pos = 6;
 
     while (pos + 4 < data.length) {
-        // 找字符串结尾
         let end = -1;
-        for (let i = pos; i < data.length; i++) {
+        // 同 readTerminated：UTF-16 按 2 字节对齐扫描，避免假终止符
+        for (let i = pos; i < data.length; i += step) {
             if (wide) {
                 if (data[i] === 0x00 && data[i + 1] === 0x00) {
                     end = i;
@@ -117,7 +203,7 @@ function parseSyltFrame(data) {
         if (pos + 4 > data.length)
             break;
 
-        const timeMs = uint32(data, pos);
+        const timeMs = uint32be(data, pos);
         pos += 4;
 
         if (text)
@@ -127,67 +213,193 @@ function parseSyltFrame(data) {
     return entries.length ? entries : null;
 }
 
-// --------------------------------------------------------------- 标签遍历
+/**
+ * 解析 USLT 帧 → 纯文本歌词。
+ * 结构：[编码 1][语言 3][描述(0 结尾)][歌词正文]
+ * @param {Uint8Array} data
+ * @returns {string|null}
+ */
+function parseUsltFrame(data) {
+    if (data.length < 4)
+        return null;
+
+    const encoding = data[0];
+    const {next} = readTerminated(data, 4, encoding);
+    const text = normalizeLyricsText(decodeText(data.subarray(next), encoding));
+
+    return text || null;
+}
 
 /**
- * 在 ID3v2 标签体里找 SYLT 帧。
- * @param {Uint8Array} body 标签头之后的字节
- * @param {number} major 主版本号（3 或 4）
- * @param {boolean} tagUnsync 整个标签的反同步标志
- * @returns {Array<{timeMs: number, text: string}>|null}
+ * 解析 TXXX / COMM 帧，只有描述里含 "lyric" 时才当歌词。
+ * TXXX: [编码][描述(0结尾)][值]
+ * COMM: [编码][语言3][描述(0结尾)][文本]
+ * @param {Uint8Array} data
+ * @param {boolean} hasLanguage COMM 有 3 字节语言字段
+ * @returns {string|null}
  */
-function findSylt(body, major, tagUnsync) {
-    // 跳过扩展头
-    let pos = 0;
-    if (major === 3) {
-        const size = uint32(body, 0);
-        if (size > 0 && size < body.length)
-            pos = 4 + size;
-    } else if (major === 4) {
+function parseDescribedFrame(data, hasLanguage) {
+    if (data.length < 4)
+        return null;
+
+    const encoding = data[0];
+    const start = hasLanguage ? 4 : 1;
+    const desc = readTerminated(data, start, encoding);
+
+    if (!/lyric/i.test(desc.text))
+        return null;
+
+    const text = normalizeLyricsText(decodeText(data.subarray(desc.next), encoding));
+    return text || null;
+}
+
+/** SYLT 条目 → 标准 LRC 文本 */
+function entriesToLrc(entries) {
+    return entries
+        .slice()
+        .sort((a, b) => a.timeMs - b.timeMs)
+        .map(({timeMs, text}) => {
+            const total = Math.max(0, Math.floor(timeMs));
+            const m = String(Math.floor(total / 60000)).padStart(2, '0');
+            const s = String(Math.floor((total % 60000) / 1000)).padStart(2, '0');
+            const cs = String(Math.floor((total % 1000) / 10)).padStart(2, '0');
+            return `[${m}:${s}.${cs}]${text}`;
+        })
+        .join('\n');
+}
+
+// --------------------------------------------------------------- 帧遍历
+
+/**
+ * 计算帧区起点（跳过扩展头）。
+ * @param {Uint8Array} body
+ * @param {number} major
+ * @param {number} headerFlags ID3 头部标志字节
+ * @returns {number}
+ */
+function frameStart(body, major, headerFlags) {
+    const hasExtended = (headerFlags & 0x40) !== 0;
+    if (major === 4) {
+        if (!hasExtended)
+            return 0;
         const size = syncsafe(body, 0);
-        if (size > 0 && size < body.length)
-            pos = size;
+        return size > 0 && size < body.length ? size : 0;
     }
+    if (major === 3) {
+        if (!hasExtended)
+            return 0;
+        // v2.3 扩展头长度字段本身不含这 4 字节
+        const size = uint32be(body, 0);
+        const start = 4 + size;
+        return size > 0 && start < body.length ? start : 0;
+    }
+    return 0; // v2.2 无扩展头（0x40 表示压缩，不支持）
+}
 
-    const frameIdLen = 4;
-    const id322 = false; // 不支持 v2.2（3 字节帧 ID）
+/**
+ * 遍历标签体里的帧，把歌词候选收集起来。
+ * @param {Uint8Array} body
+ * @param {number} major
+ * @param {number} headerFlags
+ * @param {boolean} tagUnsync
+ * @returns {{synced: boolean, text: string, format: string}|null}
+ */
+function findLyrics(body, major, headerFlags, tagUnsync) {
+    let pos = frameStart(body, major, headerFlags);
 
-    while (pos + frameIdLen + 4 <= body.length) {
-        const id = String.fromCharCode(...body.subarray(pos, pos + frameIdLen));
-        if (!/^[A-Z0-9]{4}$/.test(id))
+    const idLen = major === 2 ? 3 : 4;
+    const headerLen = major === 2 ? 6 : 10;
+
+    let sylt = null;   // {text}
+    let uslt = null;   // {text, looksSynced}
+
+    while (pos + headerLen <= body.length) {
+        const id = String.fromCharCode(...body.subarray(pos, pos + idLen));
+        if (!new RegExp(`^[A-Z0-9]{${idLen}}$`).test(id))
             break; // 填充区或损坏
 
         let size;
-        let flags1;
-        if (major === 4) {
-            size = syncsafe(body, pos + 4);
-            flags1 = body[pos + 8];
+        let formatFlags = 0;
+        if (major === 2) {
+            size = uint24be(body, pos + 3);
         } else {
-            size = uint32(body, pos + 4);
-            flags1 = body[pos + 9];
+            size = major === 4 ? syncsafe(body, pos + 4) : uint32be(body, pos + 4);
+            formatFlags = body[pos + 9];
         }
 
-        if (size <= 0 || pos + 10 + size > body.length)
+        if (size > TAG_MAX_BYTES || pos + headerLen + size > body.length)
             break;
 
-        const compressed = major === 3 ? (flags1 & 0x80) !== 0 : (flags1 & 0x08) !== 0;
-        const encrypted = major === 3 ? (flags1 & 0x40) !== 0 : (flags1 & 0x04) !== 0;
-        const frameUnsync = major === 4 && (flags1 & 0x02) !== 0;
-        const hasDataLength = major === 4 && (flags1 & 0x01) !== 0;
+        const compressed = major === 4
+            ? (formatFlags & 0x08) !== 0
+            : major === 3 ? (formatFlags & 0x80) !== 0 : false;
+        const encrypted = major === 4
+            ? (formatFlags & 0x04) !== 0
+            : major === 3 ? (formatFlags & 0x40) !== 0 : false;
+        const frameUnsync = major === 4 && (formatFlags & 0x02) !== 0;
+        const hasDataLength = major === 4 && (formatFlags & 0x01) !== 0;
+        const grouped = major === 4
+            ? (formatFlags & 0x40) !== 0
+            : major === 3 ? (formatFlags & 0x20) !== 0 : false;
 
-        let data = body.subarray(pos + 10, pos + 10 + size);
-        if (hasDataLength && data.length > 4)
-            data = data.subarray(4);
+        let data = body.subarray(pos + headerLen, pos + headerLen + size);
 
-        if (id === 'SYLT' && !compressed && !encrypted) {
-            if (frameUnsync || (tagUnsync && major === 3))
-                data = deunsynchronise(data);
-            const entries = parseSyltFrame(data);
-            if (entries)
-                return entries;
+        const isLyricId = id === 'SYLT' || id === 'SLT' ||
+                          id === 'USLT' || id === 'ULT' ||
+                          id === 'TXXX' || id === 'TXX' ||
+                          id === 'COMM' || id === 'COM';
+
+        if (isLyricId) {
+            if (compressed || encrypted) {
+                logger.debug('id3', `歌词帧 ${id} 被压缩/加密，跳过`);
+            } else {
+                if (frameUnsync || (tagUnsync && major === 3))
+                    data = deunsynchronise(data);
+                if (hasDataLength && data.length > 4)
+                    data = data.subarray(4);
+                if (grouped && data.length > 1)
+                    data = data.subarray(1);
+
+                try {
+                    if (id === 'SYLT' || id === 'SLT') {
+                        const entries = parseSyltFrame(data);
+                        if (entries && !sylt)
+                            sylt = {text: entriesToLrc(entries), format: 'SYLT'};
+                    } else if (id === 'USLT' || id === 'ULT') {
+                        const text = parseUsltFrame(data);
+                        if (text && !uslt) {
+                            uslt = {
+                                text,
+                                looksSynced: /\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/.test(text),
+                            };
+                        }
+                    } else {
+                        const text = parseDescribedFrame(data, id === 'COMM' || id === 'COM');
+                        if (text && !uslt) {
+                            uslt = {
+                                text,
+                                looksSynced: /\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/.test(text),
+                            };
+                        }
+                    }
+                } catch (error) {
+                    logger.warn('id3', `解析 ${id} 帧失败`, error);
+                }
+            }
         }
 
-        pos += 10 + size;
+        pos += headerLen + size;
+    }
+
+    if (sylt)
+        return {text: sylt.text, synced: true, format: sylt.format};
+
+    if (uslt) {
+        return {
+            text: uslt.text,
+            synced: uslt.looksSynced,
+            format: uslt.looksSynced ? 'USLT/LRC' : 'USLT',
+        };
     }
 
     return null;
@@ -209,15 +421,19 @@ function readExact(stream, count) {
 }
 
 /**
- * 读取本地音频文件的内嵌 SYLT 歌词，输出标准 LRC 文本。
+ * 读取本地音频文件的内嵌歌词。
  * @param {string} path 本地文件路径
- * @returns {string|null} LRC 文本，无内嵌歌词时为 null
+ * @returns {{text: string, synced: boolean, format: string}|null}
  */
-export function readSyltLrc(path) {
+export function readEmbeddedLyrics(path) {
+    if (!path)
+        return null;
+
     let stream;
     try {
         stream = Gio.File.new_for_path(path).read(null);
-    } catch {
+    } catch (error) {
+        logger.debug('id3', '打开文件失败', {path, error: error.message});
         return null;
     }
 
@@ -226,15 +442,19 @@ export function readSyltLrc(path) {
         if (header.length < 10)
             return null;
 
-        if (header[0] !== 0x49 || header[1] !== 0x44 || header[2] !== 0x33)
-            return null; // 没有 "ID3"
+        if (header[0] !== 0x49 || header[1] !== 0x44 || header[2] !== 0x33) {
+            logger.debug('id3', '没有 ID3v2 头', {path});
+            return null;
+        }
 
         const major = header[3];
-        if (major !== 3 && major !== 4)
-            return null; // 只支持 v2.3 / v2.4
+        if (major < 2 || major > 4) {
+            logger.debug('id3', `不支持的 ID3 版本 2.${major}`, {path});
+            return null;
+        }
 
-        const flags = header[5];
-        const tagUnsync = (flags & 0x80) !== 0;
+        const headerFlags = header[5];
+        const tagUnsync = (headerFlags & 0x80) !== 0;
         const size = syncsafe(header, 6);
         if (size <= 0 || size > TAG_MAX_BYTES)
             return null;
@@ -243,22 +463,23 @@ export function readSyltLrc(path) {
         if (body.length < 10)
             return null;
 
-        const entries = findSylt(body, major, tagUnsync);
-        if (!entries)
+        const found = findLyrics(body, major, headerFlags, tagUnsync);
+        if (!found) {
+            logger.debug('id3', '标签存在但没有可用歌词帧', {path, version: `2.${major}`});
             return null;
+        }
 
-        entries.sort((a, b) => a.timeMs - b.timeMs);
+        logger.debug('id3', '读到内嵌歌词', {
+            path,
+            version: `2.${major}`,
+            format: found.format,
+            synced: found.synced,
+            chars: found.text.length,
+        });
 
-        return entries
-            .map(({timeMs, text}) => {
-                const total = Math.max(0, Math.floor(timeMs));
-                const m = String(Math.floor(total / 60000)).padStart(2, '0');
-                const s = String(Math.floor((total % 60000) / 1000)).padStart(2, '0');
-                const cs = String(Math.floor((total % 1000) / 10)).padStart(2, '0');
-                return `[${m}:${s}.${cs}]${text}`;
-            })
-            .join('\n');
-    } catch {
+        return found;
+    } catch (error) {
+        logger.warn('id3', '读取 ID3 失败', error);
         return null;
     } finally {
         try {
@@ -267,4 +488,14 @@ export function readSyltLrc(path) {
             // 忽略关闭错误
         }
     }
+}
+
+/**
+ * 旧接口：只取内嵌的同步歌词（SYLT），输出 LRC 文本。
+ * @param {string} path
+ * @returns {string|null}
+ */
+export function readSyltLrc(path) {
+    const found = readEmbeddedLyrics(path);
+    return found && found.synced ? found.text : null;
 }

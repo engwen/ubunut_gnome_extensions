@@ -7,6 +7,8 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
+import {logger} from './logger.js';
+
 const NAME_PREFIX = 'org.mpris.MediaPlayer2.';
 const OBJECT_PATH = '/org/mpris/MediaPlayer2';
 const PLAYER_IFACE = 'org.mpris.MediaPlayer2.Player';
@@ -90,7 +92,7 @@ export class MprisWatcher {
                         this._removePlayer(name);
                 });
         } catch (error) {
-            logError(error, 'TopBarLyrics: 无法监听 D-Bus');
+            logger.error('mpris', '无法监听 D-Bus', error);
         }
 
         this._listExisting();
@@ -172,17 +174,18 @@ export class MprisWatcher {
                         const signature = found.join(',');
                         if (signature !== this._lastScanSignature) {
                             this._lastScanSignature = signature;
-                            console.log(`TopBarLyrics: 总线扫描到 ${found.length} 个播放器` +
-                                        (found.length ? ` (${signature})` : ''));
+                            logger.info('mpris', `总线扫描到 ${found.length} 个播放器`, {
+                                players: signature || '(无)',
+                            });
                         }
                         for (const name of found)
                             this._addPlayer(name);
                     } catch (error) {
-                        logError(error, 'TopBarLyrics: 枚举播放器失败');
+                        logger.error('mpris', '枚举播放器失败', error);
                     }
                 });
         } catch (error) {
-            logError(error, 'TopBarLyrics: 枚举播放器失败');
+            logger.error('mpris', '枚举播放器失败', error);
         }
     }
 
@@ -193,7 +196,7 @@ export class MprisWatcher {
         if (this._players.has(name))
             return;
 
-        console.log(`TopBarLyrics: 发现播放器 ${name}`);
+        logger.info('mpris', `发现播放器 ${name}`);
 
         const entry = {
             name,
@@ -219,7 +222,7 @@ export class MprisWatcher {
                 try {
                     proxy = Gio.DBusProxy.new_finish(result);
                 } catch (error) {
-                    console.log(`TopBarLyrics: 播放器代理创建失败 ${name}: ${error.message}`);
+                    logger.warn('mpris', `播放器代理创建失败 ${name}`, error);
                     this._players.delete(name);
                     return;
                 }
@@ -314,7 +317,7 @@ export class MprisWatcher {
                         this._updateActive();
                         this._emit();
                     } catch (error) {
-                        console.log(`TopBarLyrics: 读取 ${property} 失败 ${entry.name}: ${error.message}`);
+                        logger.warn('mpris', `读取 ${property} 失败 ${entry.name}`, error);
                     }
                 });
         }
@@ -534,8 +537,12 @@ export class MprisWatcher {
             return;
 
         this._lastKey = key;
-        console.log(`TopBarLyrics: 曲目 ${state.artist || '?'} - ${state.title || '?'} ` +
-                    `[${state.status}] ${state.busName}`);
+        logger.info('mpris', '当前曲目', {
+            artist: state.artist || '?',
+            title: state.title || '?',
+            status: state.status,
+            player: state.busName,
+        });
         this._onChange?.(state);
     }
 }

@@ -394,6 +394,34 @@ export default class TopBarLyricsPreferences extends ExtensionPreferences {
         clearRow.add_suffix(clearButton);
         source.add(clearRow);
 
+        const logDir = GLib.build_filenamev([
+            GLib.get_user_cache_dir(), 'topbar-lyrics', 'logs',
+        ]);
+        const logRow = new Adw.ActionRow({
+            title: '运行日志（自动保留 3 天）',
+            subtitle: logDir,
+        });
+        const logButton = new Gtk.Button({
+            label: '打开',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['flat'],
+        });
+        logButton.connect('clicked', () => {
+            try {
+                const dir = Gio.File.new_for_path(logDir);
+                if (!dir.query_exists(null))
+                    dir.make_directory_with_parents(null);
+                Gio.AppInfo.launch_default_for_uri(dir.get_uri(), null);
+            } catch {
+                window.add_toast(new Adw.Toast({
+                    title: '无法打开日志目录', timeout: 3,
+                }));
+            }
+        });
+        logRow.add_suffix(logButton);
+        logRow.activatable_widget = logButton;
+        source.add(logRow);
+
         const templateRow = new Adw.EntryRow({
             title: '前奏/间奏的文案',
             text: settings.get_string('fallback-template'),

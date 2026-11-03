@@ -115,7 +115,14 @@ function curlGet(url, cancellable) {
  */
 export async function getText(url, cancellable = null) {
     const Soup = await loadSoup();
-    return Soup ? soupGet(Soup, url, cancellable) : curlGet(url, cancellable);
+    if (Soup) {
+        try {
+            return await soupGet(Soup, url, cancellable);
+        } catch (error) {
+            console.warn(`TopBarLyrics: libsoup 取词失败（${error.message}），改走 curl 兜底`);
+        }
+    }
+    return curlGet(url, cancellable);
 }
 
 /**

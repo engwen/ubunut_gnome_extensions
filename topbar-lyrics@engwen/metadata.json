@@ -7,6 +7,6 @@
     "50"
   ],
   "settings-schema": "org.gnome.shell.extensions.topbar-lyrics",
-  "version": 1,
+  "version": 2,
   "url": "https://lrclib.net"
 }

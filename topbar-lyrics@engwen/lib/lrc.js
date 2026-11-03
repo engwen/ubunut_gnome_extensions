@@ -121,6 +121,50 @@ export function parseLrc(source) {
     return {meta, lines};
 }
 
+/** 文本里是否已含 LRC 时间标签 */
+export function looksLikeLrc(text) {
+    return /\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/.test(String(text ?? ''));
+}
+
+/**
+ * 解析“无时间轴”的纯文本歌词（典型来源：MP3 的 USLT 帧）。
+ *
+ * 顶栏是单行显示，没有时间戳就无法知道此刻该显示哪一句，因此这里按曲长
+ * 均匀铺一条合成时间轴：首句略晚于开头，末句落在结束前，让歌词能随播放
+ * 正常推进。精度不如真 LRC，但比“有歌词却什么都不显示”好得多。
+ *
+ * 返回结构与其他歌词一致，另在 meta.synthetic 标记“时间轴是合成的”，
+ * 便于排查时一眼分辨。
+ *
+ * @param {string} source 纯文本歌词（一行一句）
+ * @param {number} durationMs 曲长（毫秒）；未知时按 4 分钟估算
+ * @returns {{meta: object, lines: {time: number, text: string, words: null}[]}}
+ */
+export function parsePlainLyrics(source, durationMs = 0) {
+    const meta = {timed: false, synthetic: true};
+
+    const texts = String(source ?? '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line && !META_RE.test(line));
+
+    if (texts.length === 0)
+        return {meta, lines: []};
+
+    const total = durationMs > 0 ? durationMs : 240000;
+    const start = Math.min(3000, total * 0.04);
+    const end = Math.max(start + 1000, total * 0.97);
+    const step = (end - start) / texts.length;
+
+    const lines = texts.map((text, index) => ({
+        time: Math.round(start + index * step),
+        text,
+        words: null,
+    }));
+
+    return {meta, lines};
+}
+
 /**
  * 二分查找当前时间对应的行号。
  * @param {{time: number}[]} lines
