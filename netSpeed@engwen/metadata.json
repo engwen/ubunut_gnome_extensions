@@ -1,0 +1,11 @@
+{
+  "uuid": "netSpeed@engwen",
+  "name": "Net Speed",
+  "description": "在顶栏实时显示上下行网速：↓ 下载、↑ 上传，数值加 K/s 或 M/s 单位，超过 999K/s 自动切换为 M/s。数值宽度按 999K/s 固定，箭头不左右飘。刷新间隔 1–10 秒可调，间距可调，可合并显示合计，显示区域（左/中/右）与排列位置可调，默认在右侧第一个。",
+  "shell-version": [
+    "49",
+    "50"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.netspeed",
+  "version": 2
+}

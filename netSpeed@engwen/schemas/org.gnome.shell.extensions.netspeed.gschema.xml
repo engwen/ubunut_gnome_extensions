@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="netspeed">
+
+  <!--
+    schema id 与扩展 uuid 解耦（uuid 是 netSpeed@engwen，含大写不宜作 schema id），
+    所以 metadata.json 里显式声明了 settings-schema。
+  -->
+  <schema id="org.gnome.shell.extensions.netspeed"
+          path="/org/gnome/shell/extensions/netspeed/">
+
+    <!-- ============ 刷新 ============ -->
+
+    <key name="refresh-interval" type="i">
+      <range min="1" max="10"/>
+      <default>2</default>
+      <summary>刷新间隔（秒）</summary>
+      <description>读取网卡计数器的间隔，取值 1 – 10 秒，默认 2 秒。</description>
+    </key>
+
+    <!-- ============ 显示方式与间距 ============ -->
+
+    <key name="display-mode" type="s">
+      <choices>
+        <choice value="split"/>
+        <choice value="combined"/>
+      </choices>
+      <default>'split'</default>
+      <summary>显示方式</summary>
+      <description>split：下载、上传各显示一个数值；combined：只显示一个 ⇅ 合计数值。</description>
+    </key>
+
+    <key name="group-gap" type="i">
+      <range min="0" max="40"/>
+      <default>10</default>
+      <summary>下载与上传之间的间距（像素）</summary>
+      <description>两组「箭头 + 数值」之间的距离，0 – 40 像素。</description>
+    </key>
+
+    <key name="arrow-gap" type="i">
+      <range min="0" max="20"/>
+      <default>6</default>
+      <summary>箭头与数字之间的间距（像素）</summary>
+      <description>每一组内部，箭头图标与数字之间的距离，0 – 20 像素。</description>
+    </key>
+
+    <!-- ============ 位置与排序 ============ -->
+
+    <key name="position" type="s">
+      <choices>
+        <choice value="left"/>
+        <choice value="center"/>
+        <choice value="right"/>
+      </choices>
+      <default>'right'</default>
+      <summary>顶栏区域</summary>
+      <description>网速显示在顶栏的左侧、中间还是右侧。</description>
+    </key>
+
+    <key name="position-index" type="i">
+      <range min="0" max="20"/>
+      <default>0</default>
+      <summary>区域内排列位置</summary>
+      <description>在该区域中排第几位，0 表示最靠前（默认即右侧第一个）。</description>
+    </key>
+
+  </schema>
+</schemalist>

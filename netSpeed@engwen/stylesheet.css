@@ -1,0 +1,44 @@
+/* Net Speed — 顶栏网速：纯文字，无背景、无胶囊样式 */
+
+.netspeed-button {
+    background: transparent;
+    background-color: transparent;
+    border: none;
+    border-color: transparent;
+    box-shadow: none;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.netspeed-box {
+    margin: 0;
+    padding: 0;
+}
+
+.netspeed-pair {
+    margin: 0;
+    padding: 0;
+}
+
+/* 箭头不设固定宽度：多出来的空白会变成看不见的间隔，
+   让「箭头与数字的间距」看起来比设置值大。宽度差只在切换
+   分开/合并显示（↓ ↔ ⇅）时出现，可以忽略。 */
+.netspeed-arrow {
+    padding: 0;
+    margin: 0;
+    background: transparent;
+}
+
+/* 数值的最小宽度由 extension.js 按「999K/s」的实测像素宽度内联设置，
+   这样 0K/s ↔ 999K/s 跳动时整体宽度不变，两边的箭头不会左右飘。 */
+.netspeed-value {
+    padding: 0;
+    margin: 0;
+    background: transparent;
+}
+
+.netspeed-label {
+    padding: 0;
+    margin: 0;
+    background: transparent;
+}
