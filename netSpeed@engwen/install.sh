@@ -15,7 +15,10 @@ echo "已安装到: $DEST"
 echo
 
 if command -v gnome-extensions > /dev/null 2>&1; then
-    if gnome-extensions enable "$UUID" 2> /dev/null; then
+    # 没有会话总线时 enable 的退出码依然是 0，只能靠 info 回查真实状态
+    gnome-extensions enable "$UUID" > /dev/null 2>&1 || true
+
+    if gnome-extensions info "$UUID" > /dev/null 2>&1; then
         echo "已启用，顶栏应该马上出现网速。"
     else
         echo "自动启用失败（多半是当前 shell 读不到你的会话总线），请手动启用："
