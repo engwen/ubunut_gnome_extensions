@@ -1,0 +1,11 @@
+{
+  "uuid": "panelZones@engwen",
+  "name": "Panel Zones",
+  "description": "把顶栏右侧图标分成最左、中间（弹性）、最右三段，并支持在顶栏直接拖拽换位。未配置的新图标自动进入中间弹性区；系统菜单锁定在最右侧。",
+  "shell-version": [
+    "49",
+    "50"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.panelzones",
+  "version": 1
+}

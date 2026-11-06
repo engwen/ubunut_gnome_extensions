@@ -1,0 +1,18 @@
+/* Panel Zones — 分区容器与编辑态视觉提示 */
+
+.pz-zone {
+    margin: 0;
+    padding: 0;
+}
+
+/* 编辑态：给三个区加一层底色，方便看清"能放到哪" */
+.pz-zone-editing {
+    background-color: rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    margin: 2px 1px;
+}
+
+/* 接管点击的透明覆盖层，只在编辑态存在 */
+.pz-overlay {
+    background-color: transparent;
+}

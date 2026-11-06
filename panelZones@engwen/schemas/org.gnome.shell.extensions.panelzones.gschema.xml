@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="panelzones">
+
+  <schema id="org.gnome.shell.extensions.panelzones"
+          path="/org/gnome/shell/extensions/panelzones/">
+
+    <!-- ============ 三个区的内容（有序，字符串是 role） ============ -->
+
+    <key name="zone-left" type="as">
+      <default>['netspeed']</default>
+      <summary>最左区</summary>
+      <description>固定在右侧区域最左边的图标，按数组顺序排列。默认放网速。</description>
+    </key>
+
+    <key name="zone-middle" type="as">
+      <default>[]</default>
+      <summary>中间弹性区</summary>
+      <description>显式放在中间的图标。未配置过的新图标也会自动落在这里。</description>
+    </key>
+
+    <key name="zone-right" type="as">
+      <default>[]</default>
+      <summary>最右区</summary>
+      <description>靠近系统菜单的图标，按数组顺序排列，例如刷屏、天气、壁纸、输入法。</description>
+    </key>
+
+    <!-- ============ 图标间距（像素，三个区各自独立） ============ -->
+
+    <!--
+      GNOME 50 的 St 删掉了 -natural-hpadding（libst-18.so 里已经搜不到这个字符串），
+      所以老的 "Status Area Horizontal Spacing" 扩展必然失效。
+      这里改成直接给每个图标的面板按钮写 padding：相邻两个按钮各出一半，
+      合起来就是设置的间距；主题自带的 padding 被完整覆盖，结果可预期。
+    -->
+
+    <key name="gap-left" type="i">
+      <range min="0" max="48"/>
+      <default>12</default>
+      <summary>最左区图标间距</summary>
+      <description>相邻图标之间的像素间隔。0 表示紧贴。</description>
+    </key>
+
+    <key name="gap-middle" type="i">
+      <range min="0" max="48"/>
+      <default>12</default>
+      <summary>中间区图标间距</summary>
+      <description>相邻图标之间的像素间隔。0 表示紧贴。</description>
+    </key>
+
+    <key name="gap-right" type="i">
+      <range min="0" max="48"/>
+      <default>12</default>
+      <summary>最右区图标间距</summary>
+      <description>相邻图标之间的像素间隔。0 表示紧贴。</description>
+    </key>
+
+    <!-- ============ 状态 ============ -->
+
+    <key name="layout-version" type="i">
+      <range min="0" max="9"/>
+      <default>0</default>
+      <summary>布局状态</summary>
+      <description>0 = 尚未接管（首次启用时按当前顺序初始化）；1 = 自动初始化；2 = 用户拖拽过。</description>
+    </key>
+
+    <key name="edit-mode" type="b">
+      <default>false</default>
+      <summary>编辑模式</summary>
+      <description>开启后可在顶栏直接拖动图标，点击不会触发图标原本的菜单。</description>
+    </key>
+
+  </schema>
+</schemalist>
