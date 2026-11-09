@@ -30,6 +30,25 @@ const TICK_SLOW_MS = 250;    // 纯静态显示时的低频校准
 const GRADIENT_WINDOW = 2.0;   // 过渡窗口宽度（字符数）
 const GRADIENT_STEPS = 12;     // 渐变量化级数（越大越平滑，开销略增）
 
+// St.Label 的 CSS `color` 会盖掉 Pango 在 **offset 0** 处的 foreground。
+// 实测：`<span foreground="#2ee66b">已唱</span><span foreground="#74a3ff">未唱</span>`
+// 渲染出来第一段是主题白，只有从第二个字符开始的 span 才生效。而歌词的"已唱"
+// 恰好永远排在第一段，于是扫过去的字全变白、只有渐变边缘那个字有颜色。
+//
+// 解法：让真正的文字从 offset 1 起步——前置一个零宽的 word joiner 当锚点。
+// 它自己被 CSS 覆盖也无所谓（不可见），实测不改变文字宽度（delta=0）。
+const MARKUP_ANCHOR = '\u2060';
+
+/**
+ * 给 markup 加锚点，绕过 offset 0 被 CSS color 覆盖的问题。
+ * @param {string} markup
+ * @param {string} color 锚点自身的颜色（会被覆盖，仅作占位）
+ * @returns {string}
+ */
+function withAnchor(markup, color) {
+    return `<span foreground="${color}">${MARKUP_ANCHOR}</span>${markup}`;
+}
+
 /**
  * @param {string} text
  * @returns {string}
@@ -322,7 +341,8 @@ class LyricsView extends St.Widget {
             return; // 量化后无变化，跳过重排
 
         this._paintMarkup = markup;
-        this._label.clutter_text.set_markup(markup);
+        // 必须带锚点，否则第一段（也就是已唱段）会被 CSS color 刷成主题白
+        this._label.clutter_text.set_markup(withAnchor(markup, inactive));
     }
 
     // --------------------------------------------------------------- 滚动逻辑

@@ -114,6 +114,24 @@ topbar-lyrics@engwen/
 `../tools/headless-test/` 提供了无需桌面的端到端验证脚本（headless GNOME Shell +
 假 MPRIS 播放器 + Shell 内部截图），详见该目录 README。
 
+`../tools/lyrics-color-test/e2e.sh` 专测着色：真实截图后数像素，断言已唱段是已唱色、
+未唱段是未唱色、且**白色像素为 0**。改渲染代码后必须跑它。
+
+### 一个必知的渲染坑：offset 0 的 foreground 会被 CSS 盖掉
+
+`St.Label` 的 CSS `color` 会覆盖 Pango markup 在 **offset 0** 处的 `foreground`。
+实测：
+
+```xml
+<span foreground="#2ee66b">AAAA</span><span foreground="#74a3ff">CCCC</span>
+```
+
+渲染出来 `AAAA` 是主题白，只有 `CCCC` 是蓝色。而歌词的「已唱」恰好永远排在第一段，
+于是唱过的字全变白、只有渐变边缘那个字有颜色。
+
+修复：markup 前面加一个零宽的 word joiner（`U+2060`）当锚点，让真正的文字从 offset 1
+开始。锚点自己被覆盖也无所谓（不可见），实测不改变文字宽度（delta = 0）。
+
 ## 已知限制
 
 - 卡拉 OK 的逐字精度取决于歌词源；普通 LRC 在行内按时间线性推进（增强 LRC 可逐字）

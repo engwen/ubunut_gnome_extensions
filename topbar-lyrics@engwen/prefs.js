@@ -171,7 +171,9 @@ function buildPreview(settings) {
             : `<span foreground="${inactive}">${escapeMarkup(text)}</span>`;
 
         // font_size 单位是 1/1000 磅，px 转磅约 * 0.75
-        label.set_markup(`<span font_size="${Math.round(fontSize * 750)}">${body}</span>`);
+        // 前置零宽锚点：St.Label 的 CSS color 会盖掉 offset 0 处的 foreground，
+        // 不加的话预览里"已唱"那段永远是主题白（与顶栏同一个坑）。
+        label.set_markup(`\u2060<span font_size="${Math.round(fontSize * 750)}">${body}</span>`);
         return GLib.SOURCE_CONTINUE;
     });
 
